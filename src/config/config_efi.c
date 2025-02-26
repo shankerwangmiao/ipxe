@@ -27,25 +27,11 @@ FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 /** @file
  *
  * EFI-specific configuration options
- *
+ * This file pulls config_efi_exec when EFI_DOWNGRADE_UX is not defined
  */
 
 PROVIDE_REQUIRING_SYMBOL();
 
-/*
- * Drag in all requested console types
- *
- */
-
-#ifdef CONSOLE_EFI
-REQUIRE_OBJECT ( efi_console );
-#endif
-#ifdef CONSOLE_EFIFB
-REQUIRE_OBJECT ( efi_fbcon );
-#endif
-#ifdef CONSOLE_FRAMEBUFFER
-REQUIRE_OBJECT ( efi_fbcon );
-#endif
-#ifdef DOWNLOAD_PROTO_FILE
-REQUIRE_OBJECT ( efi_local );
+#ifndef EFI_DOWNGRADE_UX
+REQUIRE_OBJECT ( config_efi_exec );
 #endif
