@@ -44,6 +44,7 @@ jobs:
       ref-ipxe-builder-utils: ${{ steps.imagehash.outputs.ref-ipxe-builder-utils }}
       ref-ipxe-signer: ${{ steps.imagehash.outputs.ref-ipxe-signer }}
       ref-ipxe-signer-pcscd: ${{ steps.imagehash.outputs.ref-ipxe-signer-pcscd }}
+      images: ${{ steps.imagehash.outputs.images }}
     steps:
       - name: Setup Skopeo
         uses: warjiang/setup-skopeo@main
@@ -79,6 +80,44 @@ jobs:
               IMAGE=$(echo ${ref} | sed 's/:[^:]*$//')
               echo "ref-${image}=${IMAGE}@${DIGEST}" | tee -a $GITHUB_OUTPUT
           done
+          echo "images=$(echo "${images}" | yq -o json -I 0 '.')" | tee -a $GITHUB_OUTPUT
+
+  reproducible-env:
+    name: Reproducible Environment
+    runs-on: ubuntu-latest
+    needs:
+      - sourcedate
+      - images
+    steps:
+
+      - name: Reproducible Environment
+        env:
+          SOURCE_DATE_EPOCH: ${{ needs.sourcedate.outputs.source_date_epoch }}
+          image_hashes: ${{ toJson(needs.images.outputs) }}
+          images: ${{ needs.images.outputs.images }}
+        run: |
+          jq \
+            --argjson image_hashes "$image_hashes" \
+            --argjson source_date_epoch "$SOURCE_DATE_EPOCH" \
+            --argjson images "$images" \
+            --null-input \
+            '{
+              source_date_epoch: $source_date_epoch,
+              images: ([
+                $images | .[] | {
+                  image: .ref | sub (":[^:]*$"; ""),
+                  tag: .ref | scan (":([^:]*)$") | .[0],
+                  hash: $image_hashes["ref-" + .image] | scan ("@([^@]*)$") | .[0],
+                }
+              ]),
+            }' | yq -p json | tee reproducible-env.yaml
+      - name: Upload
+        uses: actions/upload-artifact@v7
+        with:
+          if-no-files-found: error
+          path: reproducible-env.yaml
+          archive: false
+
 
   bios:
     name: BIOS / ${{ matrix.arch }}
