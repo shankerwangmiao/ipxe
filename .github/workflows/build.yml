@@ -30,11 +30,62 @@ jobs:
           )
           echo "source_date_epoch=${SOURCE_DATE_EPOCH}" | tee -a $GITHUB_OUTPUT
 
+  images:
+    name: Container Image Hashes
+    runs-on: ubuntu-latest
+    outputs:
+      ref-ipxe-builder-i386: ${{ steps.imagehash.outputs.ref-ipxe-builder-i386 }}
+      ref-ipxe-builder-x86_64: ${{ steps.imagehash.outputs.ref-ipxe-builder-x86_64 }}
+      ref-ipxe-builder-arm32: ${{ steps.imagehash.outputs.ref-ipxe-builder-arm32 }}
+      ref-ipxe-builder-arm64: ${{ steps.imagehash.outputs.ref-ipxe-builder-arm64 }}
+      ref-ipxe-builder-loong64: ${{ steps.imagehash.outputs.ref-ipxe-builder-loong64 }}
+      ref-ipxe-builder-riscv32: ${{ steps.imagehash.outputs.ref-ipxe-builder-riscv32 }}
+      ref-ipxe-builder-riscv64: ${{ steps.imagehash.outputs.ref-ipxe-builder-riscv64 }}
+      ref-ipxe-builder-utils: ${{ steps.imagehash.outputs.ref-ipxe-builder-utils }}
+      ref-ipxe-signer: ${{ steps.imagehash.outputs.ref-ipxe-signer }}
+      ref-ipxe-signer-pcscd: ${{ steps.imagehash.outputs.ref-ipxe-signer-pcscd }}
+    steps:
+      - name: Setup Skopeo
+        uses: warjiang/setup-skopeo@main
+        with:
+          version: latest
+      - name: Get image digest
+        id: imagehash
+        env:
+          images: >-
+            - image: ipxe-builder-i386
+              ref: ghcr.io/ipxe/ipxe-builder-i386:latest
+            - image: ipxe-builder-x86_64
+              ref: ghcr.io/ipxe/ipxe-builder-x86_64:latest
+            - image: ipxe-builder-arm32
+              ref: ghcr.io/ipxe/ipxe-builder-arm32:latest
+            - image: ipxe-builder-arm64
+              ref: ghcr.io/ipxe/ipxe-builder-arm64:latest
+            - image: ipxe-builder-loong64
+              ref: ghcr.io/ipxe/ipxe-builder-loong64:latest
+            - image: ipxe-builder-riscv32
+              ref: ghcr.io/ipxe/ipxe-builder-riscv32:latest
+            - image: ipxe-builder-riscv64
+              ref: ghcr.io/ipxe/ipxe-builder-riscv64:latest
+            - image: ipxe-builder-utils
+              ref: ghcr.io/ipxe/ipxe-builder-utils:latest
+            - image: ipxe-signer
+              ref: ghcr.io/ipxe/ipxe-signer:latest
+            - image: ipxe-signer-pcscd
+              ref: ghcr.io/ipxe/ipxe-signer-pcscd:latest
+        run: |
+          echo "${images}" | yq -r '.[] | [.image, .ref] |  join(",")' | while IFS=, read -r image ref; do
+              DIGEST=$(skopeo --insecure-policy inspect --raw docker://${ref} | skopeo manifest-digest /dev/stdin)
+              IMAGE=$(echo ${ref} | sed 's/:[^:]*$//')
+              echo "ref-${image}=${IMAGE}@${DIGEST}" | tee -a $GITHUB_OUTPUT
+          done
+
   bios:
     name: BIOS / ${{ matrix.arch }}
     runs-on: ubuntu-latest
     needs:
       - sourcedate
+      - images
     strategy:
       fail-fast: false
       matrix:
@@ -42,7 +93,7 @@ jobs:
           - i386
           - x86_64
     container:
-      image: ghcr.io/ipxe/ipxe-builder-${{ matrix.arch }}
+      image: ${{ needs.images.outputs[format('ref-ipxe-builder-{0}', matrix.arch)] }}
     env:
       bindir: >-
         ${{ matrix.arch == 'i386' && 'bin' || 'bin-x86_64-pcbios' }}
@@ -94,6 +145,7 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - sourcedate
+      - images
     strategy:
       fail-fast: false
       matrix:
@@ -101,7 +153,7 @@ jobs:
           - riscv32
           - riscv64
     container:
-      image: ghcr.io/ipxe/ipxe-builder-${{ matrix.arch }}
+      image: ${{ needs.images.outputs[format('ref-ipxe-builder-{0}', matrix.arch)] }}
     env:
       bindir: bin-${{ matrix.arch }}
       SOURCE_DATE_EPOCH: ${{ needs.sourcedate.outputs.source_date_epoch }}
@@ -133,6 +185,7 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - sourcedate
+      - images
     strategy:
       fail-fast: false
       matrix:
@@ -145,7 +198,7 @@ jobs:
           - riscv64
           - x86_64
     container:
-      image: ghcr.io/ipxe/ipxe-builder-${{ matrix.arch }}
+      image: ${{ needs.images.outputs[format('ref-ipxe-builder-{0}', matrix.arch)] }}
     env:
       bindir: bin-${{ matrix.arch }}-efi
       SOURCE_DATE_EPOCH: ${{ needs.sourcedate.outputs.source_date_epoch }}
@@ -180,6 +233,7 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - sourcedate
+      - images
     strategy:
       fail-fast: false
       matrix:
@@ -187,7 +241,7 @@ jobs:
           - arm64
           - x86_64
     container:
-      image: ghcr.io/ipxe/ipxe-builder-${{ matrix.arch }}
+      image: ${{ needs.images.outputs[format('ref-ipxe-builder-{0}', matrix.arch)] }}
     env:
       bindir: bin-${{ matrix.arch }}-efi-sb
       SOURCE_DATE_EPOCH: ${{ needs.sourcedate.outputs.source_date_epoch }}
@@ -226,6 +280,7 @@ jobs:
     runs-on: ${{ needs.uefi-sb.outputs.sbsignenv || 'ubuntu-latest' }}
     needs:
       - uefi-sb
+      - images
     strategy:
       fail-fast: false
       matrix:
@@ -233,12 +288,12 @@ jobs:
           - arm64
           - x86_64
     container:
-      image: ghcr.io/ipxe/ipxe-signer
+      image: ${{ needs.images.outputs['ref-ipxe-signer'] }}
       volumes:
         - run-pcscd:/run/pcscd
     services:
       pcscd:
-        image: ghcr.io/ipxe/ipxe-signer-pcscd
+        image: ${{ needs.images.outputs['ref-ipxe-signer-pcscd'] }}
         volumes:
           - run-pcscd:/run/pcscd
         options: >-
@@ -318,6 +373,7 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - sourcedate
+      - images
     strategy:
       fail-fast: false
       matrix:
@@ -337,7 +393,7 @@ jobs:
           - arch: x86_64
             exec: valgrind
     container:
-      image: ghcr.io/ipxe/ipxe-builder-${{ matrix.arch }}
+      image: ${{ needs.images.outputs[format('ref-ipxe-builder-{0}', matrix.arch)] }}
     env:
       bindir: bin-${{ matrix.arch }}-linux
       SOURCE_DATE_EPOCH: ${{ needs.sourcedate.outputs.source_date_epoch }}
@@ -403,8 +459,9 @@ jobs:
       - sbsign
       - shim
       - sourcedate
+      - images
     container:
-      image: ghcr.io/ipxe/ipxe-builder-utils
+      image: ${{ needs.images.outputs['ref-ipxe-builder-utils'] }}
     env:
       efishims: >-
         -e shim/shimaa64.efi
@@ -518,8 +575,9 @@ jobs:
   version:
     name: Version
     runs-on: ubuntu-latest
+    needs: images
     container:
-      image: ghcr.io/ipxe/ipxe-builder-utils
+      image: ${{ needs.images.outputs['ref-ipxe-builder-utils'] }}
     env:
       bindir: bin
     steps:
